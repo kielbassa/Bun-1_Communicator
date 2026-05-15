@@ -8,6 +8,9 @@
 #include <Adafruit_SSD1306.h>
 #include <graphics.h>
 
+// AES libraries
+#include "encryption_aes.h"
+
 // LoRa libraries
 #include <LoRa.h>
 #include <SPI.h>
@@ -53,7 +56,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
 BluetoothSerial SerialBT;
 
 // Global variables
-const String deviceName = "ESP32_OLED-2";
+const String deviceName = "ESP32_OLED-1";
 
 String btBuffer      = "";   // buffer for incoming BT data
 String messageToSend = "";   // message waiting in outbox to be sent via LoRa
@@ -166,11 +169,14 @@ void transition(AppState newState){
 }
 
 void sendViaLoRa(const String& msg){
+  String encrypted = encryptAES(msg);
   LoRa.beginPacket();
-  LoRa.print(msg);
+  LoRa.print(encrypted);
   LoRa.endPacket();
-  Serial.println("LoRa TX: " + msg);
+  Serial.println("LoRa TX : " + msg);
+  Serial.println("LoRa TX (encrypted): " + encrypted);
   SerialBT.println("LoRa TX OK: " + msg);
+  SerialBT.println("LoRa TX (encrypted): " + encrypted);
 }
 
 void receiveViaLoRa(){
@@ -181,7 +187,10 @@ void receiveViaLoRa(){
       incoming += (char)LoRa.read();
     }
     Serial.println("LoRa RX: " + incoming);
+    String decrypted = decryptAES(incoming);
+    Serial.println("LoRa RX (decrypted): " + decrypted);
     SerialBT.println("LoRa RX: " + incoming);
+    SerialBT.println("LoRa RX (decrypted): " + decrypted);
     lastReceived = incoming;
   }
 }
