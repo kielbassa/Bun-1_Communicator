@@ -60,7 +60,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
 BluetoothSerial SerialBT;
 
 // Global variables
-const String deviceName = "ESP32_OLED-2";
+String deviceName = "";  // assigned at boot with a random suffix
 
 String btBuffer      = "";   // buffer for incoming BT data
 String messageToSend = "";   // message waiting in outbox to be sent via LoRa
@@ -120,7 +120,9 @@ void setup() {
   }
   Serial.println("LoRa init succeeded.");
 
-  // Bluetooth
+  // Bluetooth - pick a random two-digit suffix so each boot gets a unique name
+  randomSeed(esp_random());
+  deviceName = "ESP32_OLED_" + String(random(10, 100));
   SerialBT.begin(deviceName);
   Serial.println("BT started: " + deviceName);
 
@@ -341,7 +343,7 @@ void drawMenu() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("MENU:");
+  display.println(deviceName + " MENU:");
   display.println("----------------");
   display.println("1. Send message.");
   display.println("2. Inbox.");
