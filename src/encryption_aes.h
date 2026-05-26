@@ -5,8 +5,8 @@
 #include <StreamString.h>
 
 
-// AES-256 - Key
-const uint8_t AES_KEY[32] = {
+// AES-256 key — non-const so it can be updated at runtime via setAESKeyFromHex()
+uint8_t aesKey[32] = {
   0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
   0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
   0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
@@ -29,7 +29,7 @@ String encryptAES(const String& plaintext) {
 
   mbedtls_aes_context aes;
   mbedtls_aes_init(&aes);
-  mbedtls_aes_setkey_enc(&aes, AES_KEY, 256);
+  mbedtls_aes_setkey_enc(&aes, aesKey, 256);
 
   // Fixed size buffers instead of VLAs
   uint8_t input[AES_MAX_LEN]  = {0};
@@ -60,6 +60,33 @@ String encryptAES(const String& plaintext) {
   return hex;
 }
 
+// Update the AES-256 key from a 64-character hex string (case-insensitive).
+// Returns true on success, false if the string length or characters are invalid.
+bool setAESKeyFromHex(const String& hexKey) {
+  if (hexKey.length() != 64) return false;
+  uint8_t newKey[32];
+  for (int i = 0; i < 32; i++) {
+    String byteStr = hexKey.substring(i * 2, i * 2 + 2);
+    char *end;
+    long val = strtol(byteStr.c_str(), &end, 16);
+    if (*end != '\0' || val < 0 || val > 255) return false;
+    newKey[i] = (uint8_t)val;
+  }
+  memcpy(aesKey, newKey, 32);
+  return true;
+}
+
+// Returns the current AES key as a 64-character lowercase hex string.
+String getAESKeyHex() {
+  String hex = "";
+  hex.reserve(64);
+  for (int i = 0; i < 32; i++) {
+    if (aesKey[i] < 0x10) hex += "0";
+    hex += String(aesKey[i], HEX);
+  }
+  return hex;
+}
+
 String decryptAES(const String& hexCipher){
     size_t len = hexCipher.length() / 2;
 
@@ -82,7 +109,7 @@ String decryptAES(const String& hexCipher){
 
   mbedtls_aes_context aes;
   mbedtls_aes_init(&aes);
-  mbedtls_aes_setkey_dec(&aes, AES_KEY, 256);
+  mbedtls_aes_setkey_dec(&aes, aesKey, 256);
 
   uint8_t iv[16];
   memcpy(iv, AES_IV, 16);

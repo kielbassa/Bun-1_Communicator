@@ -39,6 +39,9 @@
 // Debounce time in ms
 #define DEBOUNCE_MS 200
 
+// Max gap between two presses to count as a double press (ms)
+#define DOUBLE_PRESS_MS 400
+
 //state machine states
 enum AppState {
   MENU,
@@ -46,7 +49,8 @@ enum AppState {
   OUTBOX_READY,
   SENDING,
   INBOX,
-  CONFIG
+  CONFIG,
+  CONFIG_EDIT_KEY   // waiting for new AES key over BT
 };
 
 AppState currentState = MENU;
@@ -56,24 +60,31 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
 BluetoothSerial SerialBT;
 
 // Global variables
-const String deviceName = "ESP32_OLED-1";
+const String deviceName = "ESP32_OLED-2";
 
 String btBuffer      = "";   // buffer for incoming BT data
 String messageToSend = "";   // message waiting in outbox to be sent via LoRa
 String lastReceived  = "";   // last received message via LoRa (for display in inbox)
 
-bool lastButtonState   = HIGH;
-unsigned long lastDebounceTime = 0;
+bool lastButtonState        = HIGH;
+unsigned long lastDebounceTime  = 0;
+
+// Double-press tracking
+unsigned long pendingPressTime  = 0;
+uint8_t       pendingPressCount = 0;
 
 //function prototypes
 void transition(AppState newState);
 bool buttonPressed();
+void clearPendingPress();
+int  checkButtonEvent();
 void drawMenu();
 void drawOutboxIdle();
 void drawOutboxReady(const String& msg);
 void drawSending(const String& msg);
 void drawInbox();
 void drawConfig();
+void drawConfigEditKey();
 
 
 void setup() {
@@ -145,7 +156,41 @@ bool buttonPressed() {
   return false;
 }
 
+void clearPendingPress() {
+  pendingPressCount = 0;
+  pendingPressTime  = 0;
+}
+
+// Returns 0 = no event, 1 = single press confirmed, 2 = double press confirmed.
+// Single press is confirmed after DOUBLE_PRESS_MS with no follow-up press.
+// Double press fires immediately on the second press within the window.
+int checkButtonEvent() {
+  bool pressed = buttonPressed();
+  unsigned long now = millis();
+
+  if (pressed) {
+    if (pendingPressCount == 0) {
+      pendingPressCount = 1;
+      pendingPressTime  = now;
+    } else if (pendingPressCount == 1 &&
+               (now - pendingPressTime) <= DOUBLE_PRESS_MS) {
+      pendingPressCount = 0;
+      return 2;  // double press
+    }
+  }
+
+  // Single press confirmed once the window expires
+  if (pendingPressCount == 1 &&
+      (millis() - pendingPressTime) > DOUBLE_PRESS_MS) {
+    pendingPressCount = 0;
+    return 1;  // single press
+  }
+
+  return 0;
+}
+
 void transition(AppState newState){
+  clearPendingPress();
   switch(newState){
     case MENU:
       drawMenu();
@@ -164,6 +209,9 @@ void transition(AppState newState){
       break;
     case CONFIG:
       drawConfig();
+      break;
+    case CONFIG_EDIT_KEY:
+      drawConfigEditKey();
       break;
   }
 }
@@ -191,13 +239,13 @@ void receiveViaLoRa(){
     Serial.println("LoRa RX (decrypted): " + decrypted);
     SerialBT.println("LoRa RX: " + incoming);
     SerialBT.println("LoRa RX (decrypted): " + decrypted);
-    lastReceived = incoming;
+    lastReceived = decrypted;
   }
 }
 
 void loop(){
-  String btLine = readBTLine();
-  bool btnState = buttonPressed();
+  String btLine  = readBTLine();
+  int    btnEvent = checkButtonEvent();  // 0=none, 1=single press, 2=double press
 
   switch(currentState){
     case MENU:
@@ -219,8 +267,8 @@ void loop(){
         messageToSend = btLine;
         transition(OUTBOX_READY);
         currentState = OUTBOX_READY;
-      } 
-      if(btnState){
+      }
+      if(btnEvent >= 1){
         transition(MENU);
         currentState = MENU;
       }
@@ -231,7 +279,7 @@ void loop(){
         messageToSend = btLine;
         drawOutboxReady(messageToSend);
       }
-      if(btnState){
+      if(btnEvent >= 1){
         transition(SENDING);
         currentState = SENDING;
         Serial.println("Sending: " + messageToSend);
@@ -246,20 +294,44 @@ void loop(){
       break;
 
     case INBOX:
-      if(btnState){
+      if(btnEvent >= 1){
         transition(MENU);
         currentState = MENU;
       }
       break;
+
     case CONFIG:
-      if(btnState){
+      if(btnEvent == 2){
+        // Double press: enter AES key edit mode
+        transition(CONFIG_EDIT_KEY);
+        currentState = CONFIG_EDIT_KEY;
+      } else if(btnEvent == 1){
         transition(MENU);
         currentState = MENU;
+      }
+      break;
+
+    case CONFIG_EDIT_KEY:
+      if(btLine.length() > 0){
+        if(btLine.length() == 64 && setAESKeyFromHex(btLine)){
+          SerialBT.println("AES key updated OK.");
+          SerialBT.println("New key: " + getAESKeyHex());
+          Serial.println("AES key updated: " + getAESKeyHex());
+          transition(CONFIG);
+          currentState = CONFIG;
+        } else {
+          SerialBT.println("ERROR: expected 64 hex chars, got " +
+                           String(btLine.length()) + ". Try again or press btn to cancel.");
+        }
+      }
+      if(btnEvent >= 1){
+        transition(CONFIG);
+        currentState = CONFIG;
       }
       break;
   }
 
-  //recive LoRa messages
+  //receive LoRa messages
   receiveViaLoRa();
 }
 
@@ -315,17 +387,35 @@ void drawSending(const String& msg) {
 }
 
 void drawConfig() {
+  String keyHex = getAESKeyHex();
   display.clearDisplay();
   display.setCursor(0, 0);
   display.println("Configuration:");
-  display.println("----------------");
-  display.print("Frequency: ");
+  display.print("Freq: ");
   display.print(LORA_FREQUENCY / 1E6);
   display.println(" MHz");
   display.print("BT: ");
   display.println(deviceName);
-  display.println("----------------");
-  display.println("press button to go back");
+  display.println("AES key:");
+  display.println(keyHex.substring(0, 16));   // bytes  0-7
+  display.println(keyHex.substring(16, 32));  // bytes 8-15
+  display.println("btn=back");
+  display.println("dbl=edit AES key");
+  display.display();
+}
+
+void drawConfigEditKey() {
+  String keyHex = getAESKeyHex();
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("Edit AES Key:");
+  display.println("Send 64 hex chars");
+  display.println("via BT.");
+  display.println("Current key:");
+  display.println(keyHex.substring(0, 16));   // bytes  0-7
+  display.println(keyHex.substring(16, 32));  // bytes 8-15
+  display.println("...");
+  display.println("btn=cancel");
   display.display();
 }
 
