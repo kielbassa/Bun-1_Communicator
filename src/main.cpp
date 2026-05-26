@@ -44,6 +44,7 @@
 
 //state machine states
 enum AppState {
+  WAITING_BT,   // splash — held until a BT client connects
   MENU,
   OUTBOX_IDLE,
   OUTBOX_READY,
@@ -53,7 +54,7 @@ enum AppState {
   CONFIG_EDIT_KEY   // waiting for new AES key over BT
 };
 
-AppState currentState = MENU;
+AppState currentState = WAITING_BT;
 
 //auxiliary variables
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
@@ -83,6 +84,7 @@ void drawOutboxIdle();
 void drawOutboxReady(const String& msg);
 void drawSending(const String& msg);
 void drawInbox();
+void drawWaitingBT();
 void drawConfig();
 void drawConfigEditKey();
 
@@ -103,13 +105,9 @@ void setup() {
   display.setTextSize(1);
   display.setTextColor(WHITE);
 
-  // Ekran powitalny
-  display.drawBitmap(0, 0, epd_bitmap_bunnytransmssion, 64, 64, WHITE);
-  display.setCursor(64, 10);
-  display.println("Waiting");
-  display.setCursor(64, 18);
-  display.println("for BT...");
-  display.display();
+  // Bluetooth - pick a random two-digit suffix so each boot gets a unique name
+  randomSeed(esp_random());
+  deviceName = "ESP32_OLED_" + String(random(10, 100));
 
   // LoRa
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_SS);
@@ -120,13 +118,11 @@ void setup() {
   }
   Serial.println("LoRa init succeeded.");
 
-  // Bluetooth - pick a random two-digit suffix so each boot gets a unique name
-  randomSeed(esp_random());
-  deviceName = "ESP32_OLED_" + String(random(10, 100));
+  // BT Start
   SerialBT.begin(deviceName);
   Serial.println("BT started: " + deviceName);
 
-  transition(MENU);
+  transition(WAITING_BT);
 }
 
 String readBTLine() {
@@ -194,6 +190,9 @@ int checkButtonEvent() {
 void transition(AppState newState){
   clearPendingPress();
   switch(newState){
+    case WAITING_BT:
+      drawWaitingBT();
+      break;
     case MENU:
       drawMenu();
       break;
@@ -250,6 +249,13 @@ void loop(){
   int    btnEvent = checkButtonEvent();  // 0=none, 1=single press, 2=double press
 
   switch(currentState){
+    case WAITING_BT:
+      if (SerialBT.connected()) {
+        transition(MENU);
+        currentState = MENU;
+      }
+      break;
+
     case MENU:
       if(btLine == "1"){
         messageToSend = "";
@@ -338,6 +344,18 @@ void loop(){
 }
 
 // Functions to draw different screens on OLED
+
+void drawWaitingBT() {
+  display.clearDisplay();
+  display.drawBitmap(0, 0, epd_bitmap_bunnytransmssion, 64, 64, WHITE);
+  display.setCursor(64, 10);
+  display.println(deviceName);
+  display.setCursor(64, 22);
+  display.println("Waiting");
+  display.setCursor(64, 32);
+  display.println("for BT...");
+  display.display();
+}
 
 void drawMenu() {
   display.clearDisplay();
