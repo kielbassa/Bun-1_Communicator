@@ -348,7 +348,7 @@ void loop(){
 void drawWaitingBT() {
   display.clearDisplay();
   display.drawBitmap(0, 0, epd_bitmap_bunnytransmssion, 64, 64, WHITE);
-  display.setCursor(64, 10);
+  display.setCursor(50, 10);
   display.println(deviceName);
   display.setCursor(64, 22);
   display.println("Waiting");
@@ -377,7 +377,7 @@ void drawOutboxIdle() {
   display.println("Enter message:");
   display.println("via BT...");
   display.println();
-  display.println("press button to cancel");
+  display.println("press btn to cancel");
   display.display();
 }
 
