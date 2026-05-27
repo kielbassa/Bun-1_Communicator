@@ -18,7 +18,7 @@ const uint8_t AES_IV[16] = {
   0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99
 };
 
-#define AES_MAX_LEN 112 
+#define AES_MAX_LEN 112
 
 
 String encryptAES(const String& plaintext) {
@@ -117,9 +117,16 @@ String decryptAES(const String& hexCipher){
   mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, len, iv, input, output);
   mbedtls_aes_free(&aes);
 
-  // Strip PKCS#7 padding
+  // Strip PKCS#7 padding — validate before trusting the value.
+  // An incorrect key produces garbage, which would cause padByte > len
+  // and an unsigned underflow that crashes with a LoadStoreError.
   uint8_t padByte = output[len - 1];
-  size_t  realLen = len - padByte;
+
+  if (padByte == 0 || padByte > 16 || padByte > len) {
+    Serial.println("AES ERROR: invalid padding (wrong key?)");
+    return "";
+  }
+  size_t realLen = len - padByte;
 
   String result = "";
   result.reserve(realLen);
