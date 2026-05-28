@@ -95,6 +95,8 @@ void drawOutboxReady(const String& msg);
 void drawSending(const String& msg);
 void addToInbox(const String& msg, int rssi);
 void drawInbox();
+void loadDeviceNameFromNVS();
+void saveDeviceNameToNVS();
 void loadAESKeyFromNVS();
 void saveAESKeyToNVS();
 void drawWaitingBT();
@@ -118,9 +120,9 @@ void setup() {
   display.setTextSize(1);
   display.setTextColor(WHITE);
 
-  // Bluetooth - pick a random two-digit suffix so each boot gets a unique name
+  // Device name: load persisted name from NVS, or generate one on first boot
   randomSeed(esp_random());
-  deviceName = "ESP32_OLED_" + String(random(10, 100));
+  loadDeviceNameFromNVS();
 
   // LoRa
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_SS);
@@ -175,29 +177,28 @@ void clearPendingPress() {
   pendingPressTime  = 0;
 }
 
-// Returns 0 = no event, 1 = single press confirmed, 2 = double press confirmed.
-// Single press is confirmed after DOUBLE_PRESS_MS with no follow-up press.
-// Double press fires immediately on the second press within the window.
+// Returns 0=none, 1=single, 2=double, 3=triple.
+// Each new press within DOUBLE_PRESS_MS of the previous one extends the sequence.
+// Triple fires immediately; single and double fire after the window expires.
 int checkButtonEvent() {
   bool pressed = buttonPressed();
   unsigned long now = millis();
 
   if (pressed) {
-    if (pendingPressCount == 0) {
-      pendingPressCount = 1;
-      pendingPressTime  = now;
-    } else if (pendingPressCount == 1 &&
-               (now - pendingPressTime) <= DOUBLE_PRESS_MS) {
+    pendingPressCount++;
+    pendingPressTime = now;  // rolling window: reset from the most recent press
+    if (pendingPressCount >= 3) {
       pendingPressCount = 0;
-      return 2;  // double press
+      return 3;  // triple press: fire immediately
     }
   }
 
-  // Single press confirmed once the window expires
-  if (pendingPressCount == 1 &&
+  // Single or double confirmed once the window expires with no further press
+  if (pendingPressCount > 0 &&
       (millis() - pendingPressTime) > DOUBLE_PRESS_MS) {
+    int count = pendingPressCount;
     pendingPressCount = 0;
-    return 1;  // single press
+    return count;  // 1 or 2
   }
 
   return 0;
@@ -338,11 +339,20 @@ void loop(){
       break;
 
     case CONFIG:
-      if(btnEvent == 2){
+      if (btnEvent == 3) {
+        // Triple press: regenerate device name, persist, restart BT
+        deviceName = "ESP32_OLED_" + String(random(10, 100));
+        saveDeviceNameToNVS();
+        SerialBT.end();
+        SerialBT.begin(deviceName);
+        Serial.println("New device name: " + deviceName);
+        transition(WAITING_BT);
+        currentState = WAITING_BT;
+      } else if (btnEvent == 2) {
         // Double press: enter AES key edit mode
         transition(CONFIG_EDIT_KEY);
         currentState = CONFIG_EDIT_KEY;
-      } else if(btnEvent == 1){
+      } else if (btnEvent == 1) {
         transition(MENU);
         currentState = MENU;
       }
@@ -389,6 +399,27 @@ void addToInbox(const String& msg, int rssi) {
 }
 
 // NVS helpers
+
+void loadDeviceNameFromNVS() {
+  prefs.begin("bun1", true);
+  String saved = prefs.getString("devname", "");
+  prefs.end();
+  if (saved.length() > 0) {
+    deviceName = saved;
+    Serial.println("Device name loaded from NVS: " + deviceName);
+  } else {
+    deviceName = "ESP32_OLED_" + String(random(10, 100));
+    saveDeviceNameToNVS();
+    Serial.println("Device name generated and saved: " + deviceName);
+  }
+}
+
+void saveDeviceNameToNVS() {
+  prefs.begin("bun1", false);
+  prefs.putString("devname", deviceName);
+  prefs.end();
+  Serial.println("Device name saved to NVS: " + deviceName);
+}
 
 void loadAESKeyFromNVS() {
   prefs.begin("bun1", true);  // read-only
@@ -484,8 +515,8 @@ void drawConfig() {
   display.println("AES key:");
   display.println(keyHex.substring(0, 16));   // bytes  0-7
   display.println(keyHex.substring(16, 32));  // bytes 8-15
-  display.println("btn=back");
-  display.println("dbl=edit AES key");
+  display.println("btn=bk dbl=AESkey");
+  display.println("tpl=new devname");
   display.display();
 }
 
