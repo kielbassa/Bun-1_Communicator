@@ -69,8 +69,13 @@ String deviceName = "";  // assigned at boot with a random suffix
 
 String btBuffer      = "";   // buffer for incoming BT data
 String messageToSend = "";   // message waiting in outbox to be sent via LoRa
-String lastReceived  = "";   // last received message via LoRa (for display in inbox)
-int    lastRSSI      = 0;    // RSSI of the last received LoRa packet (dBm)
+
+// Inbox ring buffer — index 0 is always the newest message
+#define INBOX_SIZE 5
+String inboxMsgs[INBOX_SIZE];
+int    inboxRssi[INBOX_SIZE];
+int    inboxCount   = 0;  // number of stored messages (0..INBOX_SIZE)
+int    inboxViewIdx = 0;  // index of the message currently on screen
 
 bool lastButtonState        = HIGH;
 unsigned long lastDebounceTime  = 0;
@@ -88,6 +93,7 @@ void drawMenu();
 void drawOutboxIdle();
 void drawOutboxReady(const String& msg);
 void drawSending(const String& msg);
+void addToInbox(const String& msg, int rssi);
 void drawInbox();
 void loadAESKeyFromNVS();
 void saveAESKeyToNVS();
@@ -246,12 +252,12 @@ void receiveViaLoRa(){
       incoming += (char)LoRa.read();
     }
     Serial.println("LoRa RX: " + incoming);
-    lastRSSI = LoRa.packetRssi();
     String decrypted = decryptAES(incoming);
     Serial.println("LoRa RX (decrypted): " + decrypted);
     SerialBT.println("LoRa RX: " + incoming);
     SerialBT.println("LoRa RX (decrypted): " + decrypted);
-    lastReceived = decrypted.length() > 0 ? decrypted : "[decrypt failed]";
+    String toStore = decrypted.length() > 0 ? decrypted : "[decrypt failed]";
+    addToInbox(toStore, LoRa.packetRssi());
     currentState = INBOX;
     transition(INBOX);
   }
@@ -322,7 +328,10 @@ void loop(){
       break;
 
     case INBOX:
-      if(btnEvent >= 1){
+      if (btnEvent == 2 && inboxCount > 1) {
+        inboxViewIdx = (inboxViewIdx + 1) % inboxCount;
+        drawInbox();
+      } else if (btnEvent == 1) {
         transition(MENU);
         currentState = MENU;
       }
@@ -362,6 +371,21 @@ void loop(){
 
   //receive LoRa messages
   receiveViaLoRa();
+}
+
+// Inbox helpers
+
+void addToInbox(const String& msg, int rssi) {
+  // Shift existing entries down, dropping the oldest when the buffer is full
+  int newCount = min(inboxCount + 1, INBOX_SIZE);
+  for (int i = newCount - 1; i > 0; i--) {
+    inboxMsgs[i] = inboxMsgs[i - 1];
+    inboxRssi[i] = inboxRssi[i - 1];
+  }
+  inboxMsgs[0] = msg;
+  inboxRssi[0] = rssi;
+  inboxCount   = newCount;
+  inboxViewIdx = 0;  // always land on the newest message on arrival
 }
 
 // NVS helpers
@@ -483,22 +507,34 @@ void drawConfigEditKey() {
 void drawInbox() {
   display.clearDisplay();
   display.setCursor(0, 0);
-  display.println("Inbox:");
-  display.println("----------------");
-  if (lastReceived.length() == 0) {
+  if (inboxCount == 0) {
+    display.println("Inbox:");
+    display.println("----------------");
     display.println("No messages yet.");
+    display.println();
+    display.println("btn=back");
   } else {
-    if (lastReceived.length() > 21) {
-      display.println(lastReceived.substring(0, 21));
-      display.println(lastReceived.substring(21, 42));
+    const String& msg = inboxMsgs[inboxViewIdx];
+    display.print("Inbox ");
+    display.print(inboxViewIdx + 1);
+    display.print("/");
+    display.println(inboxCount);
+    display.println("----------------");
+    if (msg.length() > 21) {
+      display.println(msg.substring(0, 21));
+      display.println(msg.substring(21, 42));
     } else {
-      display.println(lastReceived);
+      display.println(msg);
     }
     display.print("RSSI: ");
-    display.print(lastRSSI);
+    display.print(inboxRssi[inboxViewIdx]);
     display.println(" dBm");
+    display.println();
+    if (inboxCount > 1) {
+      display.println("btn=back dbl=next");
+    } else {
+      display.println("btn=back");
+    }
   }
-  display.println();
-  display.println("press button to go back");
   display.display();
 }
