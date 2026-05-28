@@ -258,6 +258,13 @@ void receiveViaLoRa(){
 }
 
 void loop(){
+  // If BT drops while in any active state, return to the splash screen.
+  // WAITING_BT already polls for reconnection, so no extra logic is needed.
+  if (currentState != WAITING_BT && !SerialBT.connected()) {
+    currentState = WAITING_BT;
+    transition(WAITING_BT);
+  }
+
   String btLine  = readBTLine();
   int    btnEvent = checkButtonEvent();  // 0=none, 1=single press, 2=double press
 
