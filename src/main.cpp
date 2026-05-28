@@ -2,7 +2,7 @@
 #include <BluetoothSerial.h>
 #include <string.h>
 
-// NVS
+// NVS - non volatile storage - AES key persists on reboot
 #include <Preferences.h>
 
 // OLED libraries
@@ -250,6 +250,8 @@ void receiveViaLoRa(){
     SerialBT.println("LoRa RX: " + incoming);
     SerialBT.println("LoRa RX (decrypted): " + decrypted);
     lastReceived = decrypted;
+    currentState = INBOX;
+    transition(INBOX);
   }
 }
 
