@@ -2,6 +2,9 @@
 #include <BluetoothSerial.h>
 #include <string.h>
 
+// NVS
+#include <Preferences.h>
+
 // OLED libraries
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -59,6 +62,7 @@ AppState currentState = WAITING_BT;
 //auxiliary variables
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
 BluetoothSerial SerialBT;
+Preferences prefs;
 
 // Global variables
 String deviceName = "";  // assigned at boot with a random suffix
@@ -84,6 +88,8 @@ void drawOutboxIdle();
 void drawOutboxReady(const String& msg);
 void drawSending(const String& msg);
 void drawInbox();
+void loadAESKeyFromNVS();
+void saveAESKeyToNVS();
 void drawWaitingBT();
 void drawConfig();
 void drawConfigEditKey();
@@ -121,6 +127,9 @@ void setup() {
   // BT Start
   SerialBT.begin(deviceName);
   Serial.println("BT started: " + deviceName);
+
+  // Restore AES key saved in NVS (falls back to compiled default if it hasn't been saved yet)
+  loadAESKeyFromNVS();
 
   transition(WAITING_BT);
 }
@@ -322,7 +331,8 @@ void loop(){
     case CONFIG_EDIT_KEY:
       if(btLine.length() > 0){
         if(btLine.length() == 64 && setAESKeyFromHex(btLine)){
-          SerialBT.println("AES key updated OK.");
+          saveAESKeyToNVS();
+          SerialBT.println("AES key updated and saved.");
           SerialBT.println("New key: " + getAESKeyHex());
           Serial.println("AES key updated: " + getAESKeyHex());
           transition(CONFIG);
@@ -341,6 +351,26 @@ void loop(){
 
   //receive LoRa messages
   receiveViaLoRa();
+}
+
+// NVS helpers
+
+void loadAESKeyFromNVS() {
+  prefs.begin("bun1", true);  // read-only
+  if (prefs.isKey("aeskey")) {
+    prefs.getBytes("aeskey", aesKey, 32);
+    Serial.println("AES key loaded from NVS.");
+  } else {
+    Serial.println("AES key: no saved key found, using compiled default.");
+  }
+  prefs.end();
+}
+
+void saveAESKeyToNVS() {
+  prefs.begin("bun1", false);  // read-write
+  prefs.putBytes("aeskey", aesKey, 32);
+  prefs.end();
+  Serial.println("AES key saved to NVS.");
 }
 
 // Functions to draw different screens on OLED
