@@ -70,6 +70,7 @@ String deviceName = "";  // assigned at boot with a random suffix
 String btBuffer      = "";   // buffer for incoming BT data
 String messageToSend = "";   // message waiting in outbox to be sent via LoRa
 String lastReceived  = "";   // last received message via LoRa (for display in inbox)
+int    lastRSSI      = 0;    // RSSI of the last received LoRa packet (dBm)
 
 bool lastButtonState        = HIGH;
 unsigned long lastDebounceTime  = 0;
@@ -245,11 +246,12 @@ void receiveViaLoRa(){
       incoming += (char)LoRa.read();
     }
     Serial.println("LoRa RX: " + incoming);
+    lastRSSI = LoRa.packetRssi();
     String decrypted = decryptAES(incoming);
     Serial.println("LoRa RX (decrypted): " + decrypted);
     SerialBT.println("LoRa RX: " + incoming);
     SerialBT.println("LoRa RX (decrypted): " + decrypted);
-    lastReceived = decrypted;
+    lastReceived = decrypted.length() > 0 ? decrypted : "[decrypt failed]";
     currentState = INBOX;
     transition(INBOX);
   }
@@ -485,6 +487,9 @@ void drawInbox() {
     } else {
       display.println(lastReceived);
     }
+    display.print("RSSI: ");
+    display.print(lastRSSI);
+    display.println(" dBm");
   }
   display.println();
   display.println("press button to go back");
